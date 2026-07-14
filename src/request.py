@@ -17,3 +17,15 @@ class Request:
     def finished(self):
         # Todo: Stop on EOS token instead
         return len(self.output_tokens) >= self.max_output_tokens
+
+    def mark_prefilling(self):
+        assert self.status == Status.WAITING
+        self.status = Status.PREFILLING
+
+    def mark_decoding(self):
+        assert self.status == Status.PREFILLING
+        self.status = Status.DECODING
+
+    def mark_finished(self):
+        assert self.status == Status.DECODING
+        self.status = Status.FINISHED
