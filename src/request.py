@@ -1,4 +1,3 @@
-# Stage 1: Req-equivalent — request state/lifecycle. Not yet designed.
 from enum import Enum
 class Status(Enum):
     WAITING = 1
