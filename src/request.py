@@ -6,13 +6,14 @@ class Status(Enum):
     FINISHED = 4
 
 class Request:
-    def __init__(self, requestId: int, maxOutputTokens: int, inputTokens: list[int], status: Status=Status.WAITING):
-        self.requestId = requestId
-        self.maxOutputTokens = maxOutputTokens
-        self.inputTokens = inputTokens
-        self.outputTokens = []
+    def __init__(self, request_id: int, max_output_tokens: int, input_tokens: list[int], status: Status=Status.WAITING):
+        self.request_id = request_id
+        self.max_output_tokens = max_output_tokens
+        self.input_tokens = input_tokens
+        self.output_tokens = []
         self.status = status
+        self.kv_cache = None
 
     def finished(self):
         # Todo: Stop on EOS token instead
-        return len(self.outputTokens) >= self.maxOutputTokens
+        return len(self.output_tokens) >= self.max_output_tokens

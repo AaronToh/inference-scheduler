@@ -4,14 +4,14 @@ class ScheduleBatch:
     def __init__(self, requests: list[Request]):
         self.requests = requests
 
-    def prefillRequests(self):
+    def prefill_requests(self):
         res = []
         for request in self.requests:
             if request.status == Status.PREFILLING:
                 res.append(request)
         return res
     
-    def decodeRequests(self):
+    def decode_requests(self):
         res = []
         for request in self.requests:
             if request.status == Status.DECODING:
