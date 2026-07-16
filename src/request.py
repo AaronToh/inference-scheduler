@@ -7,12 +7,16 @@ class Status(Enum):
 
 class Request:
     def __init__(self, request_id: int, max_output_tokens: int, input_tokens: list[int], status: Status=Status.WAITING):
+        assert max_output_tokens > 0
         self.request_id = request_id
         self.max_output_tokens = max_output_tokens
         self.input_tokens = input_tokens
         self.output_tokens = []
         self.status = status
         self.kv_cache = None
+
+    def __len__(self):
+        return len(self.input_tokens) + len(self.output_tokens)
 
     def finished(self):
         # Todo: Stop on EOS token instead
