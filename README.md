@@ -1,8 +1,6 @@
 # inference-scheduler
 
 A GPU inference batching scheduler, built as a learning project to mirror SGLang's scheduler
-architecture at the structural level (own reimplementation, built cold).
+architecture at the structural level.
 
-**Current stage:** 1 — designing `Req` / `ScheduleBatch` data structures.
-
-See `notes/design_log.md` for design decisions and rationale.
+Work so far: Implemented the scheduling loop that admits new requests depending on memory available. Performs prefilling or decoding at each step.
