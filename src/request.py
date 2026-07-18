@@ -4,6 +4,7 @@ class Status(Enum):
     PREFILLING = 2
     DECODING = 3
     FINISHED = 4
+    ABORTED = 5
 
 class Request:
     def __init__(self, request_id: int, max_output_tokens: int, input_tokens: list[int], status: Status=Status.WAITING):
@@ -21,6 +22,14 @@ class Request:
     def finished(self):
         # Todo: Stop on EOS token instead
         return len(self.output_tokens) >= self.max_output_tokens
+    
+    def mark_waiting(self):
+        assert self.status == Status.DECODING
+        self.input_tokens.extend(self.output_tokens)
+        self.max_output_tokens -= len(self.output_tokens)
+        self.output_tokens = []
+        self.kv_cache = []
+        self.status = Status.WAITING
 
     def mark_prefilling(self):
         assert self.status == Status.WAITING
@@ -33,3 +42,11 @@ class Request:
     def mark_finished(self):
         assert self.status == Status.DECODING
         self.status = Status.FINISHED
+
+    def mark_decoding_aborted(self):
+        assert self.status == Status.DECODING
+        self.status = Status.ABORTED
+
+    def mark_waiting_aborted(self):
+        assert self.status == Status.WAITING
+        self.status = Status.ABORTED

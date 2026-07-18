@@ -6,6 +6,9 @@ class MemoryPool:
 
     def has_space(self, num_slots: int) -> bool:
         return self.free_slots >= num_slots
+    
+    def get_capacity(self):
+        return self.total_slots
 
     def allocate(self, num_slots: int) -> list[int]:
         if not self.has_space(num_slots):
