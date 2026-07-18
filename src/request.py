@@ -14,7 +14,8 @@ class Request:
         self.input_tokens = input_tokens
         self.output_tokens = []
         self.status = status
-        self.kv_cache = None
+        self.kv_indices = None
+        self.num_cached = 0
 
     def __len__(self):
         return len(self.input_tokens) + len(self.output_tokens)
@@ -28,7 +29,7 @@ class Request:
         self.input_tokens.extend(self.output_tokens)
         self.max_output_tokens -= len(self.output_tokens)
         self.output_tokens = []
-        self.kv_cache = []
+        self.kv_indices = []
         self.status = Status.WAITING
 
     def mark_prefilling(self):

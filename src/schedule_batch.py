@@ -1,11 +1,13 @@
 from collections import deque
-from request import Request, Status
 from memory_pool import MemoryPool
+from request import Request, Status
+from trie import Trie
 
 class ScheduleBatch:
-    def __init__(self, requests: list[Request], memory_pool: MemoryPool):
+    def __init__(self, requests: list[Request], memory_pool: MemoryPool, prefix_cache: Trie):
         self.requests = requests
         self.memory_pool = memory_pool
+        self.prefix_cache = prefix_cache
 
     def __len__(self):
         return len(self.requests)
@@ -19,12 +21,15 @@ class ScheduleBatch:
                 request_queue.remove(request)
                 request.mark_waiting_aborted()
 
-        while request_queue and self.memory_pool.has_space(len(request_queue[0]) + 1):
+        while request_queue:
+            kv_indices = self.prefix_cache.match_prefix(request_queue[0].input_tokens)
+            if not self.memory_pool.has_space(len(request_queue[0]) - len(kv_indices) + 1):
+                break
             request = request_queue.popleft()
-            request.kv_cache = self.memory_pool.allocate(len(request) + 1)
+            request.num_cached = len(kv_indices)
+            request.kv_indices = kv_indices + self.memory_pool.allocate(len(request) - len(kv_indices) + 1)
             self.add(request)
             request.mark_prefilling()
-        
         
     def retract_decode(self):
         self.requests.sort(
@@ -37,13 +42,13 @@ class ScheduleBatch:
         retracted_requests = []
         while len(self.requests) > 1 and not self.memory_pool.has_space(len(self.requests)):
             request = self.requests.pop()
-            self.memory_pool.free(request.kv_cache)
+            self.prefix_cache.remove(request)
             request.mark_waiting()
             retracted_requests.append(request)
 
         if len(self.requests) <= 1 and not self.memory_pool.has_space(len(self.requests)):
             request = self.requests.pop()
-            self.memory_pool.free(request.kv_cache)
+            self.prefix_cache.remove(request)
             request.mark_decoding_aborted()
 
         return retracted_requests
@@ -57,7 +62,7 @@ class ScheduleBatch:
         for request in requests:
             # guaranteed to have memory as retract_decode called earlier
             slots = self.memory_pool.allocate(1)
-            request.kv_cache.append(slots[0])
+            request.kv_indices.append(slots[0])
             prepared.append(request)
         return prepared
 
@@ -65,7 +70,7 @@ class ScheduleBatch:
         for request in list(self.requests):
             if request.finished():
                 request.mark_finished()
-                self.memory_pool.free(request.kv_cache)
+                self.prefix_cache.remove(request)
                 self.remove(request)
 
     def prefill_requests(self):
