@@ -11,7 +11,9 @@ A fixed memory pool is provided to the scheduler. The scheduler checks for new r
 
 ## Memory Constraints
 
-As more requests with long input prompts and output responses build, the memory pool may not be sufficient. In my implementation, I remove requests from the memory pool in the order of 1. shortest output length (least sunk cost), and 2. longest input length (to free the most memory). If any single request exceeds the total memory available, it is aborted.
+Allocating contiguous chunks of the memory pool to each request causes memory inefficiencies in the form of external fragmentation. We page the memory pool using a per-request KV index array. 
+
+Additionally, as more requests with long input prompts and output responses build, the memory pool may not be sufficient. In my implementation, I remove requests from the memory pool in the order of 1. shortest output length (least sunk cost), and 2. longest input length (to free the most memory). If any single request exceeds the total memory available, it is aborted.
 
 ## Prefix caching
 
