@@ -11,7 +11,11 @@ A fixed memory pool is provided to the scheduler. The scheduler checks for new r
 
 ## Memory Constraints
 
-Allocating contiguous chunks of the memory pool to each request causes memory inefficiencies in the form of external fragmentation. We page the memory pool using a per-request KV index array. 
+### Memory Allocation
+
+Allocating contiguous chunks sized for the maximum sequence length causes both internal fragmentation (reserved-but-unused space when a request finishes early) and external fragmentation (scattered free gaps too small for new contiguous allocations). We page the memory pool into per-token slots, addressed via a per-request KV index array, eliminating both external and internal fragmentation.
+
+### Memory Retraction
 
 Additionally, as more requests with long input prompts and output responses build, the memory pool may not be sufficient. In my implementation, I remove requests from the memory pool in the order of 1. shortest output length (least sunk cost), and 2. longest input length (to free the most memory). If any single request exceeds the total memory available, it is aborted.
 
