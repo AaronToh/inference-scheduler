@@ -5,10 +5,8 @@ import triton.language as tl
 @triton.jit
 def _fwd_kernel_stage1(
         Q, 
-        K_int8,
-        V_int8,
-        k_scale,
-        v_scale,
+        K,
+        V,
         qk_scale,
         Mid_o,
         Mid_lse,
@@ -27,7 +25,6 @@ def _fwd_kernel_stage1(
     
     q_start = cur_head * head_dim
     kv_start = cur_head * seq_len * head_dim # start for this head
-    kv_scale_start = cur_head * seq_len
     mid_o_start = cur_head * num_splits * head_dim + cur_split * head_dim
     mid_lse_start = cur_head * num_splits + cur_split
 
@@ -44,15 +41,9 @@ def _fwd_kernel_stage1(
 
         k_offsets = kv_start + (n_start + tl.arange(0, BLOCK_N))[:, None] * head_dim + tl.arange(0, BLOCK_D)[None, :]
         k_mask = n_mask[:, None] & q_mask[None, :]
-        s_offsets = kv_scale_start + n_start + tl.arange(0, BLOCK_N)
 
-        k = tl.load(K_int8 + k_offsets, mask=k_mask, other=0)
-        k_scale_vals = tl.load(k_scale + s_offsets, mask=n_mask, other=0.0)
-        k = k.to(tl.float32) * k_scale_vals[:, None]
-
-        v = tl.load(V_int8 + k_offsets, mask=k_mask, other=0)
-        v_scale_vals = tl.load(v_scale + s_offsets, mask=n_mask, other=0.0)
-        v = v.to(tl.float32) * v_scale_vals[:, None]
+        k = tl.load(K + k_offsets, mask=k_mask, other=0)
+        v = tl.load(V + k_offsets, mask=k_mask, other=0)
 
         qk = tl.sum(q[None, :] * k, 1)
         qk = qk * qk_scale
@@ -117,7 +108,7 @@ def decode_attention(
     Mid_o = torch.zeros(num_heads, num_splits, head_dim, dtype=torch.float32, device=Q.device)
     Mid_lse = torch.full((num_heads, num_splits), float('-inf'), dtype=torch.float32, device=Q.device)
     _fwd_kernel_stage1[grid1](
-        Q, K_int8, V_int8, k_scale, v_scale, qk_scale, Mid_o, Mid_lse, seq_len, head_dim, BLOCK_N, BLOCK_D, SPLIT_SIZE, num_splits
+        Q, K, V, qk_scale, Mid_o, Mid_lse, seq_len, head_dim, BLOCK_N, BLOCK_D, SPLIT_SIZE, num_splits
     )
     grid2 = (num_heads,)
     _fwd_kernel_stage2[grid2](Mid_o, Mid_lse, output, head_dim, BLOCK_D, num_splits)
