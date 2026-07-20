@@ -11,7 +11,7 @@ def test_basic():
       scheduler.run()
       
       assert all(r.status == Status.FINISHED for r in requests)
-      assert all(len(r.output_tokens) == 5 for r in requests)
+      assert all(len(r) == 8 for r in requests)
 
 def test_retract():
       requests = [
@@ -23,4 +23,4 @@ def test_retract():
       scheduler.run()
 
       assert all(r.status == Status.FINISHED for r in requests)
-      assert all(len(r.output_tokens) == 30 for r in requests)
+      assert all(len(r) == 40 for r in requests)
