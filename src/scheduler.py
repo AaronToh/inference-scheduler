@@ -11,17 +11,16 @@ class DispatchMode(Enum):
     PREFILL = 1
     DECODE = 2
 
-TOTAL_SLOTS = 100
 HEAD_DIM = 16
 VOCAB_SIZE = 1000
 
 class Scheduler:
-    def __init__(self, requests: list[Request]):
+    def __init__(self, requests: list[Request], total_slots: int, model: Model):
         self.request_queue = deque(requests)
-        self.k_cache = torch.zeros(TOTAL_SLOTS, HEAD_DIM, device='cuda')
-        self.v_cache = torch.zeros(TOTAL_SLOTS, HEAD_DIM, device='cuda')
-        self.model = Model(VOCAB_SIZE, HEAD_DIM)
-        self.memory_pool = MemoryPool(100)
+        self.model = model
+        self.k_cache = torch.zeros(total_slots, model.head_dim, device='cuda')
+        self.v_cache = torch.zeros(total_slots, model.head_dim, device='cuda')
+        self.memory_pool = MemoryPool(total_slots)
         self.prefix_cache = Trie(self.memory_pool)
         self.batch = ScheduleBatch([], self.memory_pool, self.prefix_cache)
 
