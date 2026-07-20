@@ -7,7 +7,7 @@ def test_basic():
           Request(request_id=0, max_output_tokens=5, input_tokens=[1, 2, 3]),
           Request(request_id=1, max_output_tokens=5, input_tokens=[1, 2, 4])
       ]
-      scheduler = Scheduler(requests, 50, Model(1000, 16))
+      scheduler = Scheduler(requests, 50, Model(1, 1000, 16))
       scheduler.run()
       
       assert all(r.status == Status.FINISHED for r in requests)
@@ -19,7 +19,7 @@ def test_retract():
             Request(request_id=1, max_output_tokens=30, input_tokens=list(range(10,20))),
       ]
 
-      scheduler = Scheduler(requests, 50, Model(1000, 16))
+      scheduler = Scheduler(requests, 50, Model(1, 1000, 16))
       scheduler.run()
 
       assert all(r.status == Status.FINISHED for r in requests)

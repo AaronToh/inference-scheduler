@@ -10,23 +10,31 @@ def _fwd_kernel_stage1(
         qk_scale,
         Mid_o,
         Mid_lse,
-        seq_len,
-        head_dim: tl.constexpr,
+        seq_lens,
+        kv_offsets,
+        num_heads,
+        num_splits: tl.constexpr,
         BLOCK_N: tl.constexpr,
         BLOCK_D: tl.constexpr,
+        head_dim: tl.constexpr,
         SPLIT_SIZE: tl.constexpr,
-        num_splits: tl.constexpr
 ):
-    cur_head = tl.program_id(0)
-    cur_split = tl.program_id(1)
+    cur_batch = tl.program_id(0)
+    cur_head = tl.program_id(1)
+    cur_split = tl.program_id(2)
+
+    seq_len = tl.load(seq_lens + cur_batch)
 
     kv_split_start = cur_split * SPLIT_SIZE
     kv_split_end = tl.minimum(kv_split_start + SPLIT_SIZE, seq_len)
+    if kv_split_end <= kv_split_start:
+        return
     
-    q_start = cur_head * head_dim
-    kv_start = cur_head * seq_len * head_dim # start for this head
-    mid_o_start = cur_head * num_splits * head_dim + cur_split * head_dim
-    mid_lse_start = cur_head * num_splits + cur_split
+    q_start = (cur_batch * num_heads + cur_head) * head_dim
+
+    kv_start = tl.load(kv_offsets + cur_batch * num_heads + cur_head) * head_dim # start for this head
+    mid_o_start = ((cur_batch * num_heads + cur_head) * num_splits + cur_split) * head_dim
+    mid_lse_start = (cur_batch * num_heads + cur_head) * num_splits + cur_split
 
     q_offsets = q_start + tl.arange(0, BLOCK_D)
     q_mask = tl.arange(0, BLOCK_D) < head_dim
@@ -38,12 +46,13 @@ def _fwd_kernel_stage1(
 
     for n_start in range(kv_split_start, kv_split_end, BLOCK_N):
         n_mask = (n_start + tl.arange(0, BLOCK_N)) < kv_split_end
+        # todo: overlapping variable name
+        kv_offsets = kv_start + (n_start + tl.arange(0, BLOCK_N))[:, None] * head_dim + tl.arange(0, BLOCK_D)[None, :]
+        kv_mask = n_mask[:, None] & q_mask[None, :]
 
-        k_offsets = kv_start + (n_start + tl.arange(0, BLOCK_N))[:, None] * head_dim + tl.arange(0, BLOCK_D)[None, :]
-        k_mask = n_mask[:, None] & q_mask[None, :]
-
-        k = tl.load(K + k_offsets, mask=k_mask, other=0)
-        v = tl.load(V + k_offsets, mask=k_mask, other=0)
+        # ()
+        k = tl.load(K + kv_offsets, mask=kv_mask, other=0)
+        v = tl.load(V + kv_offsets, mask=kv_mask, other=0)
 
         qk = tl.sum(q[None, :] * k, 1)
         qk = qk * qk_scale
@@ -65,19 +74,35 @@ def _fwd_kernel_stage1(
     tl.store(Mid_lse + mid_lse_start, lse)
 
 @triton.jit
-def _fwd_kernel_stage2(Mid_o, Mid_lse, output, head_dim, BLOCK_D: tl.constexpr, num_splits:tl.constexpr):
-    cur_head = tl.program_id(0)
-    output_start = cur_head * head_dim
+def _fwd_kernel_stage2(
+        Mid_o,
+        Mid_lse,
+        output,
+        seq_lens,
+        num_heads,
+        head_dim,
+        num_splits: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        SPLIT_SIZE: tl.constexpr
+):
+    cur_batch = tl.program_id(0)
+    cur_head = tl.program_id(1)
+    output_start = cur_batch * num_heads * head_dim + cur_head * head_dim
+    seq_len = tl.load(seq_lens + cur_batch)
 
     m = float('-inf')
     d = 0.0
     acc = tl.zeros((BLOCK_D,), dtype=tl.float32)
+    split_start = (cur_batch * num_heads + cur_head) * num_splits # start for this head
 
     for split_id in range(num_splits):
-        o_offsets = (cur_head * num_splits + split_id) * head_dim + tl.arange(0, BLOCK_D)
-        o_mask = tl.arange(0, BLOCK_D) < head_dim 
+        if split_id * SPLIT_SIZE >= seq_len:
+            break
+        split = split_start + split_id
+        o_offsets = split * head_dim + tl.arange(0, BLOCK_D)
+        o_mask = tl.arange(0, BLOCK_D) < head_dim
         o = tl.load(Mid_o + o_offsets, mask=o_mask, other=0.0)
-        lse = tl.load(Mid_lse + cur_head * num_splits + split_id)
+        lse = tl.load(Mid_lse + split)
 
         new_m = tl.maximum(m, lse)
         old_scale = tl.exp(m - new_m)
@@ -95,21 +120,24 @@ def decode_attention(
     K: torch.Tensor,
     V: torch.Tensor,
     output: torch.Tensor,
+    seq_lens: torch.Tensor,
+    kv_offsets: torch.Tensor,
     num_heads: int,
-    seq_len: int,
-    head_dim: int,
+    head_dim: int
 ):
     qk_scale = head_dim ** -0.5
-    BLOCK_N = 16
-    BLOCK_D = max(16, triton.next_power_of_2(head_dim))
     SPLIT_SIZE = 512
-    num_splits = triton.cdiv(seq_len, 512)
-    grid1 = (num_heads, num_splits)
-    Mid_o = torch.zeros(num_heads, num_splits, head_dim, dtype=torch.float32, device=Q.device)
-    Mid_lse = torch.full((num_heads, num_splits), float('-inf'), dtype=torch.float32, device=Q.device)
+    BLOCK_N = 16 # intra-split split
+    BLOCK_D = max(16, triton.next_power_of_2(head_dim)) # head_dim block round up to nearest power of 2
+
+    num_batches = Q.shape[0]
+    num_splits = triton.cdiv(torch.max(seq_lens), SPLIT_SIZE)
+    grid1 = (num_batches, num_heads, num_splits)
+    Mid_o = torch.zeros(num_batches, num_heads, num_splits, head_dim, dtype=torch.float32, device=Q.device)
+    Mid_lse = torch.full((num_batches, num_heads, num_splits), float('-inf'), dtype=torch.float32, device=Q.device)
     _fwd_kernel_stage1[grid1](
-        Q, K, V, qk_scale, Mid_o, Mid_lse, seq_len, head_dim, BLOCK_N, BLOCK_D, SPLIT_SIZE, num_splits
+        Q, K, V, qk_scale, Mid_o, Mid_lse, seq_lens, kv_offsets, num_heads, num_splits, BLOCK_N, BLOCK_D, head_dim, SPLIT_SIZE
     )
-    grid2 = (num_heads,)
-    _fwd_kernel_stage2[grid2](Mid_o, Mid_lse, output, head_dim, BLOCK_D, num_splits)
+    grid2 = (num_batches, num_heads,)
+    _fwd_kernel_stage2[grid2](Mid_o, Mid_lse, output, seq_lens, num_heads, head_dim, num_splits, BLOCK_D, SPLIT_SIZE)
     return output

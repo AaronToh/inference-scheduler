@@ -1,7 +1,6 @@
 # inference-scheduler
 
-A GPU inference batching scheduler, built as a learning project to mirror SGLang's scheduler
-architecture at the structural level.
+A GPU inference batching scheduler, written entirely by hand.
 
 # My Work so far
 
