@@ -96,8 +96,6 @@ def _fwd_kernel_stage2(
     split_start = (cur_batch * num_heads + cur_head) * num_splits # start for this head
 
     for split_id in range(num_splits):
-        if split_id * SPLIT_SIZE >= seq_len:
-            break
         split = split_start + split_id
         o_offsets = split * head_dim + tl.arange(0, BLOCK_D)
         o_mask = tl.arange(0, BLOCK_D) < head_dim
