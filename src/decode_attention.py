@@ -47,12 +47,12 @@ def _fwd_kernel_stage1(
     for n_start in range(kv_split_start, kv_split_end, BLOCK_N):
         n_mask = (n_start + tl.arange(0, BLOCK_N)) < kv_split_end
         # todo: overlapping variable name
-        kv_offsets = kv_start + (n_start + tl.arange(0, BLOCK_N))[:, None] * head_dim + tl.arange(0, BLOCK_D)[None, :]
+        kv_offsets_split = kv_start + (n_start + tl.arange(0, BLOCK_N))[:, None] * head_dim + tl.arange(0, BLOCK_D)[None, :]
         kv_mask = n_mask[:, None] & q_mask[None, :]
 
         # ()
-        k = tl.load(K + kv_offsets, mask=kv_mask, other=0)
-        v = tl.load(V + kv_offsets, mask=kv_mask, other=0)
+        k = tl.load(K + kv_offsets_split, mask=kv_mask, other=0)
+        v = tl.load(V + kv_offsets_split, mask=kv_mask, other=0)
 
         qk = tl.sum(q[None, :] * k, 1)
         qk = qk * qk_scale
