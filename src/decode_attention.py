@@ -131,7 +131,7 @@ def decode_attention(
     BLOCK_D = max(16, triton.next_power_of_2(head_dim)) # head_dim block round up to nearest power of 2
 
     num_batches = Q.shape[0]
-    num_splits = triton.cdiv(torch.max(seq_lens), SPLIT_SIZE)
+    num_splits = triton.cdiv(torch.max(seq_lens).item(), SPLIT_SIZE)
     grid1 = (num_batches, num_heads, num_splits)
     Mid_o = torch.zeros(num_batches, num_heads, num_splits, head_dim, dtype=torch.float32, device=Q.device)
     Mid_lse = torch.full((num_batches, num_heads, num_splits), float('-inf'), dtype=torch.float32, device=Q.device)
