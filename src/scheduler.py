@@ -29,24 +29,31 @@ class Scheduler:
             input_tokens = []
             k_parts = []
             v_parts = []
-            offset = 0
             sequence_lengths = []
             kv_offsets = []
             num_heads = self.model.num_heads
+            total_sequence_length = sum((len(r)) for r in requests)
+            base_offset = 0
             for request in requests:
-                for head in num_heads:
-                    kv_indices = request.kv_indices
-                    input_tokens.append(request.output_tokens[-1])
+                kv_indices = request.kv_indices
+                input_tokens.append(request.output_tokens[-1])
 
-                    # creates a contiguous copy to match decode kernel
-                    k_parts.append(self.k_cache[kv_indices[:-1]])
-                    v_parts.append(self.v_cache[kv_indices[:-1]])
-                    sequence_lengths.append(len(kv_indices) - 1)
-                    kv_offsets.append(offset)
-                    offset += len(kv_indices) - 1
+                # creates a contiguous copy to match decode kernel
+                # (batch_size, seq_len, num_heads, head_dim)
+                k_parts.append(self.k_cache[kv_indices[:-1]])
+                v_parts.append(self.v_cache[kv_indices[:-1]])
+                sequence_length = len(request)
+                sequence_lengths.append(sequence_length)
+                head_offset = base_offset
+                base_offset += sequence_length
+                # (batch_size, num_heads)
+                for i in range(num_heads):
+                    kv_offsets.append(head_offset)
+                    head_offset += total_sequence_length
 
-            k_context = torch.cat(k_parts, dim=0)
-            v_context = torch.cat(v_parts, dim=0)
+            # (batch_size * seq_len, num_heads, head_dim)
+            k_context = torch.cat(k_parts, dim=0).permute(1, 0, 2).contiguous()
+            v_context = torch.cat(v_parts, dim=0).permute(1, 0, 2).contiguous()
             sequence_lengths = torch.tensor(sequence_lengths, device='cuda')
             kv_offsets = torch.tensor(kv_offsets, device='cuda')
             output_tokens, k_new, v_new = self.model.forward_decode(input_tokens, k_context, v_context, sequence_lengths, kv_offsets)
@@ -68,16 +75,17 @@ class Scheduler:
 
                 k_new, v_new = self.model.forward_prefill(tokens_to_fill, k_to_fill, v_to_fill)
 
-                self.k_cache[kv_indices_to_fill] = k_new[0]
-                self.v_cache[kv_indices_to_fill] = v_new[0]
+                self.k_cache[kv_indices_to_fill] = k_new
+                self.v_cache[kv_indices_to_fill] = v_new
 
                 current_token = request.input_tokens[-1]
 
                 # creates a contiguous copy to match decode kernel; to be optimised
-                k_context = self.k_cache[kv_indices[:-1]]
-                v_context = self.v_cache[kv_indices[:-1]]
-                sequence_lengths = torch.tensor([len(kv_indices) - 1], device='cuda')
-                kv_offsets = torch.tensor([0], device='cuda')
+                sequence_length = len(kv_indices) - 1
+                k_context = self.k_cache[kv_indices[:-1]].permute(1, 0, 2).contiguous()
+                v_context = self.v_cache[kv_indices[:-1]].permute(1, 0, 2).contiguous()
+                sequence_lengths = torch.tensor([sequence_length], device='cuda')
+                kv_offsets = torch.tensor([i * sequence_length for i in range(self.model.num_heads)], device='cuda')
 
                 new_tokens, k_new, v_new = self.model.forward_decode([current_token], k_context, v_context, sequence_lengths, kv_offsets)
 
